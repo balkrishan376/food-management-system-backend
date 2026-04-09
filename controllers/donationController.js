@@ -1,4 +1,5 @@
 const Donation = require('../models/Donation');
+const User = require('../models/User');
 
 // @desc    Create a new donation
 // @route   POST /api/donations

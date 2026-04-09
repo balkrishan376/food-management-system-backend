@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -11,6 +12,12 @@ dotenv.config();
 
 
 const app = express();
+
+// Log all requests
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} - ${req.get('Content-Type') || 'no content-type'}`);
+  next();
+});
 
 // Security Middleware
 app.use(helmet());
@@ -60,11 +67,38 @@ app.use('/api', limiter);
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/donations', require('./routes/donationRoutes'));
 
+app.get('/api/health', async (req, res) => {
+  try {
+    // Check database connection
+    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+
+    // If connected, try to ping
+    if (dbStatus === 'connected') {
+      await mongoose.connection.db.admin().ping();
+    }
+
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      database: dbStatus,
+      environment: process.env.NODE_ENV || 'development'
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      database: 'error',
+      error: error.message
+    });
+  }
+});
+
 app.get('/', (req, res) => {
   res.json({ 
     message: 'SustainaBite API is running...',
     environment: process.env.NODE_ENV || 'development',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   });
 });
 
@@ -81,12 +115,17 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
-  await connectDB();
+  const dbConnected = await connectDB();
+
+  if (!dbConnected) {
+    console.warn('⚠️  Starting server without database connection');
+  }
 
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`🌍 API URL: http://localhost:${PORT}`);
+    console.log(`🗄️  Database: ${dbConnected ? 'Connected' : 'Disconnected'}`);
   });
 };
 

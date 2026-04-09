@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const mongoose = require('mongoose');
 
 const protect = async (req, res, next) => {
   let token;
@@ -13,7 +13,20 @@ const protect = async (req, res, next) => {
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      req.user = await User.findById(decoded.id).select('-password');
+      // Use native MongoDB driver to avoid mongoose buffering issues
+      const db = mongoose.connection.db;
+      if (!db) {
+        throw new Error('Database not connected');
+      }
+
+      req.user = await db.collection('users').findOne(
+        { _id: new mongoose.Types.ObjectId(decoded.id) },
+        { projection: { password: 0 } } // Exclude password field
+      );
+
+      if (!req.user) {
+        return res.status(401).json({ message: 'User not found' });
+      }
 
       next();
     } catch (error) {

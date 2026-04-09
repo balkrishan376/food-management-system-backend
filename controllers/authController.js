@@ -1,15 +1,26 @@
-const User = require('../models/User');
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 const generateToken = require('../utils/generateToken');
 
 // @desc    Register a new user
 // @route   POST /api/auth/register
 // @access  Public
 const registerUser = async (req, res) => {
+  console.log('Register user request received:', req.body.email);
   try {
     const { name, email, password, role, contactNumber, organization, longitude, latitude } = req.body;
 
-    const userExists = await User.findOne({ email });
-    if (userExists) {
+    // Use native MongoDB driver to avoid mongoose buffering issues
+    const db = mongoose.connection.db;
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    console.log('Checking if user exists...');
+    const existingUser = await db.collection('users').findOne({ email });
+    console.log('User exists check completed:', !!existingUser);
+
+    if (existingUser) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
@@ -18,28 +29,34 @@ const registerUser = async (req, res) => {
       coordinates: [longitude || 0, latitude || 0],
     };
 
-    const user = await User.create({
+    const userData = {
       name,
       email,
-      password,
+      password: await bcrypt.hash(password, 10), // Hash password
       role,
       contactNumber,
       organization,
       location,
-    });
+      createdAt: new Date(),
+    };
 
-    if (user) {
+    console.log('Creating user...');
+    const result = await db.collection('users').insertOne(userData);
+    console.log('User created successfully:', result.insertedId);
+
+    if (result.insertedId) {
       res.status(201).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        token: generateToken(user._id),
+        _id: result.insertedId,
+        name: userData.name,
+        email: userData.email,
+        role: userData.role,
+        token: generateToken(result.insertedId),
       });
     } else {
       res.status(400).json({ message: 'Invalid user data' });
     }
   } catch (error) {
+    console.error('Registration error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -51,9 +68,14 @@ const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
+    const db = mongoose.connection.db;
+    if (!db) {
+      throw new Error('Database not connected');
+    }
 
-    if (user && (await user.matchPassword(password))) {
+    const user = await db.collection('users').findOne({ email });
+
+    if (user && (await bcrypt.compare(password, user.password))) {
       res.json({
         _id: user._id,
         name: user.name,
@@ -74,7 +96,12 @@ const loginUser = async (req, res) => {
 // @access  Private
 const getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    const db = mongoose.connection.db;
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const user = await db.collection('users').findOne({ _id: new mongoose.Types.ObjectId(req.user._id) });
 
     if (user) {
       res.json({
@@ -100,30 +127,37 @@ const getUserProfile = async (req, res) => {
 const updateUserProfile = async (req, res) => {
   try {
     const { name, email, contactNumber, organization, password, longitude, latitude } = req.body;
-    const user = await User.findById(req.user._id);
+    const db = mongoose.connection.db;
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const user = await db.collection('users').findOne({ _id: new mongoose.Types.ObjectId(req.user._id) });
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
     if (email && email !== user.email) {
-      const existingUser = await User.findOne({ email });
+      const existingUser = await db.collection('users').findOne({ email });
       if (existingUser && existingUser._id.toString() !== user._id.toString()) {
         return res.status(400).json({ message: 'Email already exists' });
       }
     }
 
-    user.name = name || user.name;
-    user.email = email || user.email;
-    user.contactNumber = contactNumber || user.contactNumber;
-    user.organization = organization !== undefined ? organization : user.organization;
+    const updateData = {
+      name: name || user.name,
+      email: email || user.email,
+      contactNumber: contactNumber || user.contactNumber,
+      organization: organization !== undefined ? organization : user.organization,
+    };
 
     if (password) {
-      user.password = password;
+      updateData.password = await bcrypt.hash(password, 10);
     }
 
     if (longitude !== undefined || latitude !== undefined) {
-      user.location = {
+      updateData.location = {
         type: 'Point',
         coordinates: [
           longitude !== undefined ? longitude : user.location?.coordinates?.[0] || 0,
@@ -132,18 +166,26 @@ const updateUserProfile = async (req, res) => {
       };
     }
 
-    const updatedUser = await user.save();
+    const result = await db.collection('users').updateOne(
+      { _id: new mongoose.Types.ObjectId(req.user._id) },
+      { $set: updateData }
+    );
 
-    res.json({
-      _id: updatedUser._id,
-      name: updatedUser.name,
-      email: updatedUser.email,
-      role: updatedUser.role,
-      contactNumber: updatedUser.contactNumber,
-      organization: updatedUser.organization,
-      location: updatedUser.location,
-      token: generateToken(updatedUser._id),
-    });
+    if (result.modifiedCount > 0) {
+      const updatedUser = await db.collection('users').findOne({ _id: new mongoose.Types.ObjectId(req.user._id) });
+      res.json({
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        contactNumber: updatedUser.contactNumber,
+        organization: updatedUser.organization,
+        location: updatedUser.location,
+        token: generateToken(updatedUser._id),
+      });
+    } else {
+      res.status(400).json({ message: 'Update failed' });
+    }
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
