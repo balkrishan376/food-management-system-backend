@@ -129,4 +129,9 @@ const startServer = async () => {
   });
 };
 
-startServer();
+// Check if we are running on Vercel
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  startServer();
+}
+
+module.exports = app;
