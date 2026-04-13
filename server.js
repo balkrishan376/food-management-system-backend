@@ -23,29 +23,32 @@ app.use((req, res, next) => {
 app.use(helmet());
 
 // CORS Configuration for Deployment
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://food-management-system-frontend.vercel.app',
+  'https://food-wastage-management.vercel.app'
+];
+
 app.use(cors({ 
   origin: function(origin, callback) {
-    // Allowed origins for production
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      process.env.FRONTEND_URL, // For deployed frontend
-      'https://food-management-system-frontend.vercel.app' // Direct link for reliability
-    ];
-    
     // Allow requests with no origin (mobile apps, curl requests)
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in our allowed list
+    if (allowedOrigins.includes(origin) || (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL)) {
       return callback(null, true);
     }
     
-    // Check if origin is a vercel.app subdomain (flexible but relatively secure fallback)
+    // Allow all vercel.app subdomains for better compatibility with preview deployments
     if (origin.endsWith('.vercel.app')) {
       return callback(null, true);
     }
     
-    // In production, only allow specified origins
+    // In production, be strict but log why it failed
     if (process.env.NODE_ENV === 'production') {
+      console.warn(`⚠️  CORS blocked origin: ${origin}`);
       return callback(new Error(`Not allowed by CORS: ${origin}`), false);
     }
     
