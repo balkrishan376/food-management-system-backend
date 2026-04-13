@@ -76,6 +76,9 @@ app.use('/api', limiter);
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/donations', require('./routes/donationRoutes'));
 
+// Explicit OPTIONS handler for all /api routes to ensure CORS headers are always sent
+app.options('*', cors());
+
 app.get('/api/health', async (req, res) => {
   try {
     // Check database connection
@@ -88,6 +91,7 @@ app.get('/api/health', async (req, res) => {
 
     res.json({
       status: 'ok',
+      deployId: 'v2.1-CORS-REFRESH-1776081704',
       timestamp: new Date().toISOString(),
       database: dbStatus,
       environment: process.env.NODE_ENV || 'development'
@@ -95,6 +99,7 @@ app.get('/api/health', async (req, res) => {
   } catch (error) {
     res.status(503).json({
       status: 'error',
+      deployId: 'v2.1-CORS-REFRESH-1776081704',
       timestamp: new Date().toISOString(),
       database: 'error',
       error: error.message
