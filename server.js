@@ -75,7 +75,7 @@ app.use('/api', limiter);
 // Routes
 // Explicit OPTIONS handler for all routes to ensure CORS headers are always sent
 // This must be BEFORE any other routes
-app.options('*', cors());
+app.options('(.*)', cors());
 
 // Manual CORS fallback for all responses
 app.use((req, res, next) => {
