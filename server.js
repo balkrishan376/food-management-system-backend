@@ -73,11 +73,28 @@ const limiter = rateLimit({
 app.use('/api', limiter);
 
 // Routes
+// Explicit OPTIONS handler for all routes to ensure CORS headers are always sent
+// This must be BEFORE any other routes
+app.options('*', cors());
+
+// Manual CORS fallback for all responses
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin) || (origin && origin.endsWith('.vercel.app'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization, Accept');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
+
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/donations', require('./routes/donationRoutes'));
-
-// Explicit OPTIONS handler for all /api routes to ensure CORS headers are always sent
-app.options('*', cors());
 
 app.get('/api/health', async (req, res) => {
   try {
