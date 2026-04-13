@@ -30,7 +30,8 @@ app.use(cors({
       'http://localhost:3000',
       'http://localhost:5173',
       'http://127.0.0.1:5173',
-      process.env.FRONTEND_URL // For deployed frontend
+      process.env.FRONTEND_URL, // For deployed frontend
+      'https://food-management-system-frontend.vercel.app' // Direct link for reliability
     ];
     
     // Allow requests with no origin (mobile apps, curl requests)
@@ -38,9 +39,14 @@ app.use(cors({
       return callback(null, true);
     }
     
+    // Check if origin is a vercel.app subdomain (flexible but relatively secure fallback)
+    if (origin.endsWith('.vercel.app')) {
+      return callback(null, true);
+    }
+    
     // In production, only allow specified origins
     if (process.env.NODE_ENV === 'production') {
-      return callback(new Error('Not allowed by CORS'), false);
+      return callback(new Error(`Not allowed by CORS: ${origin}`), false);
     }
     
     // In development, allow all origins
@@ -132,6 +138,9 @@ const startServer = async () => {
 // Check if we are running on Vercel
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   startServer();
+} else {
+  // Ensure DB is connected in Vercel Serverless environment
+  connectDB().catch(console.error);
 }
 
 module.exports = app;
