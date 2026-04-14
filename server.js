@@ -4,164 +4,158 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const mongoSanitize = require('express-mongo-sanitize');
 const connectDB = require('./config/db');
 const path = require('path');
 
 dotenv.config();
 
-
 const app = express();
 
-// Log all requests
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} - ${req.get('Content-Type') || 'no content-type'}`);
-  next();
-});
-
-// Security Middleware
-app.use(helmet());
-
-// CORS Configuration for Deployment
+// ─── CORS MUST BE FIRST ──────────────────────────────────────────────────────
+// Allow all vercel.app origins + localhost for development
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'https://food-management-system-frontend.vercel.app',
-  'https://food-wastage-management.vercel.app'
+  'https://food-wastage-management.vercel.app',
 ];
 
-app.use(cors({ 
-  origin: function(origin, callback) {
-    // Allow requests with no origin (mobile apps, curl requests)
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
-    
-    // Check if origin is in our allowed list
-    if (allowedOrigins.includes(origin) || (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL)) {
-      return callback(null, true);
-    }
-    
-    // Allow all vercel.app subdomains for better compatibility with preview deployments
-    if (origin.endsWith('.vercel.app')) {
-      return callback(null, true);
-    }
-    
-    // In production, be strict but log why it failed
-    if (process.env.NODE_ENV === 'production') {
-      console.warn(`⚠️  CORS blocked origin: ${origin}`);
-      return callback(new Error(`Not allowed by CORS: ${origin}`), false);
-    }
-    
-    // In development, allow all origins
-    return callback(null, true);
-  }, 
-  credentials: true 
-}));
+    // Allow explicit list
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    // Allow any FRONTEND_URL set in env
+    if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return callback(null, true);
+    // Allow all *.vercel.app preview deployments
+    if (origin.endsWith('.vercel.app')) return callback(null, true);
+    // Allow localhost for dev
+    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) return callback(null, true);
+    console.warn(`⚠️  CORS blocked origin: ${origin}`);
+    return callback(new Error(`Not allowed by CORS: ${origin}`), false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['X-Requested-With', 'Content-Type', 'Authorization', 'Accept'],
+  optionsSuccessStatus: 200,
+};
 
+// Handle preflight OPTIONS for all routes immediately
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
+
+// ─── SECURITY & PARSING ──────────────────────────────────────────────────────
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(express.json({ limit: '10kb' }));
-// app.use(mongoSanitize()); // Disabled due to Express TypeError
 
 // Serve uploads directory statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// ─── RATE LIMITING ───────────────────────────────────────────────────────────
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Increased to 1000 to accommodate 10-second telemetry polling
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
   message: 'Too many requests from this IP, please try again in 15 minutes',
-  skip: (req) => process.env.NODE_ENV !== 'production'
+  skip: (req) => process.env.NODE_ENV !== 'production',
 });
 app.use('/api', limiter);
 
-// Routes
-// Manual CORS fallback + OPTIONS preflight handler for all responses
+// ─── REQUEST LOGGING ─────────────────────────────────────────────────────────
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin) || (origin && origin.endsWith('.vercel.app'))) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization, Accept');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
 
-app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/donations', require('./routes/donationRoutes'));
-
-app.get('/api/health', async (req, res) => {
+// ─── DB HEALTH GUARD ─────────────────────────────────────────────────────────
+// For auth & donation routes, if DB is not connected, attempt reconnect once then 503
+const requireDB = async (req, res, next) => {
+  if (mongoose.connection.readyState === 1) return next();
+  console.log('DB not ready, attempting reconnect...');
   try {
-    // Check database connection
-    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
-
-    // If connected, try to ping
-    if (dbStatus === 'connected') {
-      await mongoose.connection.db.admin().ping();
-    }
-
-    res.json({
-      status: 'ok',
-      deployId: 'v2.1-CORS-REFRESH-1776081704',
-      timestamp: new Date().toISOString(),
-      database: dbStatus,
-      environment: process.env.NODE_ENV || 'development'
-    });
-  } catch (error) {
-    res.status(503).json({
-      status: 'error',
-      deployId: 'v2.1-CORS-REFRESH-1776081704',
-      timestamp: new Date().toISOString(),
-      database: 'error',
-      error: error.message
-    });
+    await connectDB();
+    if (mongoose.connection.readyState === 1) return next();
+  } catch (e) {
+    console.error('Reconnect failed:', e.message);
   }
+  return res.status(503).json({
+    success: false,
+    message: 'Database is temporarily unavailable. Please try again in a moment.',
+  });
+};
+
+// ─── ROUTES ──────────────────────────────────────────────────────────────────
+app.use('/api/auth', requireDB, require('./routes/authRoutes'));
+app.use('/api/donations', requireDB, require('./routes/donationRoutes'));
+
+// Health check — always responds, shows DB state
+app.get('/api/health', async (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  const dbStatus = dbState === 1 ? 'connected' : dbState === 2 ? 'connecting' : 'disconnected';
+  
+  let pinged = false;
+  if (dbState === 1) {
+    try {
+      await mongoose.connection.db.admin().ping();
+      pinged = true;
+    } catch (e) { /* ignore */ }
+  }
+
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    database: dbStatus,
+    dbPing: pinged,
+    environment: process.env.NODE_ENV || 'development',
+  });
 });
 
 app.get('/', (req, res) => {
-  res.json({ 
-    message: 'SustainaBite API is running...',
+  res.json({
+    message: 'SustainaBite API is running',
     environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
-    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
   });
 });
 
-// Error handling middleware
+// ─── ERROR HANDLER ───────────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  console.error('Unhandled error:', err.message);
+  // If this is a CORS error, still send CORS headers
+  if (err.message && err.message.includes('CORS')) {
+    return res.status(403).json({ success: false, message: err.message });
+  }
   res.status(err.status || 500).json({
     success: false,
     message: err.message || 'Internal Server Error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 });
 
+// ─── SERVER START ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
-  const dbConnected = await connectDB();
-
-  if (!dbConnected) {
-    console.warn('⚠️  Starting server without database connection');
-  }
+  // Attempt DB connection, but start server regardless
+  await connectDB();
 
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🌍 API URL: http://localhost:${PORT}`);
-    console.log(`🗄️  Database: ${dbConnected ? 'Connected' : 'Disconnected'}`);
+    console.log(`🗄️  Database: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Not connected (will retry per-request)'}`);
   });
 };
 
-// Check if we are running on Vercel
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-  startServer();
+// On Vercel (serverless), just connect the DB and export. Don't call listen().
+if (process.env.VERCEL) {
+  connectDB().catch((e) => console.error('Initial DB connect failed on Vercel:', e.message));
 } else {
-  // Ensure DB is connected in Vercel Serverless environment
-  connectDB().catch(console.error);
+  startServer().catch((e) => {
+    console.error('Fatal startup error:', e.message);
+    // Don't exit — let the process stay alive
+  });
 }
 
 module.exports = app;

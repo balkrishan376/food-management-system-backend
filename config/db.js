@@ -31,8 +31,14 @@ const connectDB = async () => {
       throw new Error('Missing MongoDB connection string. Set MONGO_URI or MONGODB_URI in backend/.env');
     }
 
-    // Close any existing connection
-    if (mongoose.connection.readyState !== 0) {
+    // If already connected, reuse connection (important for serverless)
+    if (mongoose.connection.readyState === 1) {
+      console.log('MongoDB: reusing existing connection');
+      return true;
+    }
+
+    // Close only if in a broken state (not connected, not connecting)
+    if (mongoose.connection.readyState === 3) {
       await mongoose.connection.close();
     }
 
@@ -40,8 +46,8 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 15000,
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
-      minPoolSize: 2,
-      maxIdleTimeMS: 30000,
+      minPoolSize: 1,
+      maxIdleTimeMS: 60000,
     });
 
     // Wait for the connection to be fully ready
@@ -68,14 +74,9 @@ const connectDB = async () => {
 
     return true;
   } catch (error) {
-    const isProduction = process.env.NODE_ENV === 'production';
     console.error(`MongoDB connection failed: ${error.message}`);
-
-    if (isProduction) {
-      process.exit(1);
-    }
-
-    console.warn('Continuing without database connection for local preview.');
+    // NEVER call process.exit() — let the server stay alive and return 503 on DB routes
+    console.warn('Server will continue running without database. DB-dependent routes will return 503.');
     return false;
   }
 };
