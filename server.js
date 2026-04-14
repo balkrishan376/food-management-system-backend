@@ -140,25 +140,17 @@ app.use((err, req, res, next) => {
 // ─── SERVER START ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 
-const startServer = async () => {
-  // Attempt DB connection, but start server regardless
-  await connectDB();
-
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🗄️  Database: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Not connected (will retry per-request)'}`);
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Connect to DB in background after server starts
+  connectDB().then((connected) => {
+    console.log(`🗄️  Database: ${connected ? 'Connected' : 'Not connected (will retry per-request)'}`);
+  }).catch(err => {
+    console.error('Initial DB connection error:', err.message);
   });
-};
+});
 
-// On Vercel (serverless), just connect the DB and export. Don't call listen().
-if (process.env.VERCEL) {
-  connectDB().catch((e) => console.error('Initial DB connect failed on Vercel:', e.message));
-} else {
-  startServer().catch((e) => {
-    console.error('Fatal startup error:', e.message);
-    // Don't exit — let the process stay alive
-  });
-}
-
+// For Vercel (serverless) compatibility
 module.exports = app;
