@@ -105,6 +105,7 @@ app.get('/api/health', async (req, res) => {
 
   res.json({
     status: 'ok',
+    version: '2.1.0-diag',
     timestamp: new Date().toISOString(),
     database: dbStatus,
     dbPing: pinged,
@@ -114,7 +115,8 @@ app.get('/api/health', async (req, res) => {
 
 app.get('/', (req, res) => {
   res.json({
-    message: 'SustainaBite API is running',
+    message: 'SustainaBite Backend API - Active',
+    version: '2.1.0-diag',
     environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
     database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
