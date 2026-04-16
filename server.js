@@ -86,14 +86,13 @@ const requireDB = async (req, res, next) => {
 };
 
 // ─── ROUTES ──────────────────────────────────────────────────────────────────
-const apiRouter = express.Router();
+// Mount auth and donation routes directly on both /api and root prefixes
+// This covers cases where the proxy might strip the /api prefix
+app.use(['/api/auth', '/auth'], requireDB, require('./routes/authRoutes'));
+app.use(['/api/donations', '/donations'], requireDB, require('./routes/donationRoutes'));
 
-// Mount auth and donation routes to the router
-apiRouter.use('/auth', requireDB, require('./routes/authRoutes'));
-apiRouter.use('/donations', requireDB, require('./routes/donationRoutes'));
-
-// Health check — always responds, shows DB state
-apiRouter.get('/health', async (req, res) => {
+// Health check and root — always responds, shows DB state
+app.get(['/api/health', '/health'], async (req, res) => {
   const dbState = mongoose.connection.readyState;
   const dbStatus = dbState === 1 ? 'connected' : dbState === 2 ? 'connecting' : 'disconnected';
   
@@ -107,7 +106,7 @@ apiRouter.get('/health', async (req, res) => {
 
   res.json({
     status: 'ok',
-    version: '2.1.1-path-fix',
+    version: '2.1.2-robust',
     timestamp: new Date().toISOString(),
     database: dbStatus,
     dbPing: pinged,
@@ -115,18 +114,22 @@ apiRouter.get('/health', async (req, res) => {
   });
 });
 
-// Mount the apiRouter at both /api and root to handle various Vercel/proxy scenarios
-// This ensures that /api/auth/login and /auth/login both reach the correct controllers
-app.use('/api', apiRouter);
-app.use('/', apiRouter);
-
 app.get('/', (req, res) => {
   res.json({
     message: 'SustainaBite Backend API - Active',
-    version: '2.1.0-diag',
+    version: '2.1.2-robust',
     environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
     database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+  });
+});
+
+// ─── 404 HANDLER ─────────────────────────────────────────────────────────────
+app.use((req, res) => {
+  console.warn(`[404] ${req.method} ${req.originalUrl}`);
+  res.status(404).json({
+    success: false,
+    message: `Endpoint ${req.originalUrl} not found on this server`,
   });
 });
 
