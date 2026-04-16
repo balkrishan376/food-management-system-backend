@@ -43,8 +43,7 @@ const corsOptions = {
   optionsSuccessStatus: 200,
 };
 
-// Handle preflight OPTIONS for all routes immediately
-app.options('*', cors(corsOptions));
+// Handle preflight OPTIONS for all routes via cors middleware
 app.use(cors(corsOptions));
 
 // ─── SECURITY & PARSING ──────────────────────────────────────────────────────
