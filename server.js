@@ -64,7 +64,7 @@ app.use('/api', limiter);
 
 // ─── REQUEST LOGGING ─────────────────────────────────────────────────────────
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} (Original: ${req.originalUrl})`);
   next();
 });
 
@@ -86,11 +86,14 @@ const requireDB = async (req, res, next) => {
 };
 
 // ─── ROUTES ──────────────────────────────────────────────────────────────────
-app.use('/api/auth', requireDB, require('./routes/authRoutes'));
-app.use('/api/donations', requireDB, require('./routes/donationRoutes'));
+const apiRouter = express.Router();
+
+// Mount auth and donation routes to the router
+apiRouter.use('/auth', requireDB, require('./routes/authRoutes'));
+apiRouter.use('/donations', requireDB, require('./routes/donationRoutes'));
 
 // Health check — always responds, shows DB state
-app.get('/api/health', async (req, res) => {
+apiRouter.get('/health', async (req, res) => {
   const dbState = mongoose.connection.readyState;
   const dbStatus = dbState === 1 ? 'connected' : dbState === 2 ? 'connecting' : 'disconnected';
   
@@ -104,13 +107,18 @@ app.get('/api/health', async (req, res) => {
 
   res.json({
     status: 'ok',
-    version: '2.1.0-diag',
+    version: '2.1.1-path-fix',
     timestamp: new Date().toISOString(),
     database: dbStatus,
     dbPing: pinged,
     environment: process.env.NODE_ENV || 'development',
   });
 });
+
+// Mount the apiRouter at both /api and root to handle various Vercel/proxy scenarios
+// This ensures that /api/auth/login and /auth/login both reach the correct controllers
+app.use('/api', apiRouter);
+app.use('/', apiRouter);
 
 app.get('/', (req, res) => {
   res.json({
