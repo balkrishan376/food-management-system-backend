@@ -57,15 +57,24 @@ const seedData = async () => {
     console.log('Connecting to database...');
     await connectDB();
 
-    console.log('Checking for existing users...');
+    console.log('Syncing user accounts...');
     const createdUsers = [];
     
     for (const u of users) {
       let user = await User.findOne({ email: u.email });
       if (user) {
-        console.log(`ℹ️ User ${u.email} already exists.`);
+        console.log(`ℹ️ User ${u.email} already exists. Resetting password/details...`);
+        user.name = u.name;
+        user.password = u.password; // Triggers pre('save') hook for hashing
+        user.role = u.role;
+        user.contactNumber = u.contactNumber;
+        user.organization = u.organization;
+        user.status = 'approved';
+        user.location = u.location;
+        await user.save();
+        console.log(`✅ User ${u.email} synced.`);
       } else {
-        user = await User.create(u);
+        user = await User.create({ ...u, status: 'approved' });
         console.log(`✅ User ${u.email} (${u.role}) created successfully.`);
       }
       createdUsers.push(user);
@@ -74,7 +83,7 @@ const seedData = async () => {
     const donor = createdUsers.find(u => u.role === 'donor' && u.email === 'sender@example.com');
     
     if (donor) {
-      console.log('\nCreating sample donations...');
+      console.log('\nSyncing sample donations...');
       const donations = [
         {
           donorId: donor._id,
@@ -116,12 +125,15 @@ const seedData = async () => {
           await Donation.create(d);
           console.log(`✅ Donation "${d.description.substring(0, 20)}..." created.`);
         } else {
-          console.log(`ℹ️ Donation "${d.description.substring(0, 20)}..." already exists.`);
+          // Update existing donation to keep it "fresh" (e.g. reset expiry)
+          donationExists.expiryTime = d.expiryTime;
+          await donationExists.save();
+          console.log(`ℹ️ Donation "${d.description.substring(0, 20)}..." refreshed.`);
         }
       }
     }
 
-    console.log('\n✨ Database seeding process finished.');
+    console.log('\n✨ Database sync process finished.');
     process.exit(0);
   } catch (error) {
     console.error(`\n❌ Error during seeding: ${error.message}`);
@@ -130,4 +142,5 @@ const seedData = async () => {
 };
 
 seedData();
+
 
